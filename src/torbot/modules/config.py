@@ -14,7 +14,13 @@ if not config_file_path:
 
 modules_directory = Path(config_file_path).parent
 torbot_directory = modules_directory.parent
-project_root_directory = torbot_directory.parent
+# Under the src layout, torbot_directory is src/torbot, so its parent is src
+# and its grandparent is the actual repository root.
+if torbot_directory.parent.name == "src":
+    project_root_directory = torbot_directory.parent.parent
+else:
+    project_root_directory = torbot_directory.parent
+
 dotenv_path = os.path.join(project_root_directory, ".env")
 load_dotenv(dotenv_path=dotenv_path, verbose=True)
 

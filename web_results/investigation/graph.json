@@ -1,0 +1,32 @@
+{
+  "edges": [
+    {
+      "evidenceIds": [
+        "ev-d75bcf2cbea2d3e6"
+      ],
+      "id": "edge-e294701f06262cc5",
+      "relation": "mentions",
+      "source": "page-7d42136cbf01b73f",
+      "target": "email-2a8e30b9fd5c7adf"
+    }
+  ],
+  "nodes": [
+    {
+      "evidenceIds": [
+        "ev-d75bcf2cbea2d3e6"
+      ],
+      "id": "email-2a8e30b9fd5c7adf",
+      "type": "email",
+      "value": "rkmvparivar@vidyamandira.ac.in"
+    },
+    {
+      "evidenceIds": [
+        "ev-d75bcf2cbea2d3e6"
+      ],
+      "id": "page-7d42136cbf01b73f",
+      "type": "page",
+      "value": "https://rkmvmfamily.in/"
+    }
+  ],
+  "schema": "evidence-graph.v1"
+}

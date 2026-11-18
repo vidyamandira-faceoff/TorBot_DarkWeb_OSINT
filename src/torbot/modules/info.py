@@ -61,12 +61,19 @@ def execute_all(
     each for a given link.
 
     Args:
-        link (str): Link to be interogated.
+        link (str): Link to be interrogated.
         display_status (bool, optional): Whether to print connection
             attempts to terminal.
     """
+    for dataset in datasets:
+        dataset.clear()
 
-    resp = client.get(url=link)
+    try:
+        resp = client.get(url=link)
+    except Exception as exc:
+        cprint(f"Error connecting to target {link}: {exc}", "red")
+        return
+
     soup = BeautifulSoup(resp.text, "html.parser")
     validation_functions = [
         get_robots_txt,
@@ -80,17 +87,21 @@ def execute_all(
         try:
             validate_func(client, link, resp)
         except Exception as e:
-            logging.debug(e)
-            cprint("Error", "red")
+            logging.debug("Error in %s: %s", validate_func.__name__, e)
+            cprint(f"Error checking {validate_func.__name__}", "red")
 
     display_webpage_description(soup)
-    # display_headers(response)
 
 
 def fetch_html(
     client: httpx.Client, link: str, tree: LinkTree, save_html: bool = False
 ) -> None:
-    resp = client.get(url=link)
+    try:
+        resp = client.get(url=link)
+    except Exception as exc:
+        cprint(f"Error fetching HTML for {link}: {exc}", "red")
+        return
+
     soup = BeautifulSoup(resp.text, "html.parser")
 
     if save_html is False:
@@ -101,7 +112,7 @@ def fetch_html(
     else:  # save_html is True
         file_name = tree._get_tree_file_name()
         print(f"SAVED to {file_name}.html\n\n")
-        with open(f"{file_name}.html", "w+") as f:
+        with open(f"{file_name}.html", "w+", encoding="utf-8") as f:
             f.write(str(soup))
 
 
@@ -121,46 +132,66 @@ def display_headers(response):
         print("*", key, ":", val)
 
 
-def get_robots_txt(client: httpx.Client, target: str, response: str) -> None:
-    """Check link for Robot.txt, and if found, add link to robots dataset.
+def get_robots_txt(client: httpx.Client, target: str, response: object) -> None:
+    """Check link for robots.txt, and if found, add rules to robots dataset.
 
     Args:
         target (str): URL to be checked.
-        response (object): Response object containing data to check.
+        response (object): Response object of main page.
     """
     cprint("[*]Checking for Robots.txt", "yellow")
-    url = target
-    target = "{0.scheme}://{0.netloc}/".format(urlsplit(url))
-    client.get(target + "robots.txt")
-    print(target + "robots.txt")
+    parsed = urlsplit(target)
+    base_target = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    robots_url = f"{base_target}/robots.txt"
+    print(robots_url)
+    try:
+        robots_resp = client.get(robots_url)
+        if robots_resp.status_code == 200 and robots_resp.text:
+            cprint("Robots.txt found", "blue")
+            matches = re.findall(r"(?:Allow|Disallow):\s*([^\s#]+)", robots_resp.text, re.IGNORECASE)
+            for match in matches:
+                match = match.strip()
+                if match and "*" not in match:
+                    entry = f"{base_target}/{match.lstrip('/')}"
+                    robots.add(entry)
+            if robots:
+                print(f"Found {len(robots)} robots.txt paths")
+                for r_path in sorted(robots):
+                    print("Robots path:", r_path)
+        else:
+            cprint(f"NO robots.txt found (status: {robots_resp.status_code})", "blue")
+    except Exception as exc:
+        logging.debug("Error checking robots.txt: %s", exc)
+        cprint("Robots.txt check skipped (unreachable)", "blue")
 
-    matches = re.findall(r"Allow: (.*)|Disallow: (.*)", response.text)
-    for match in matches:
-        match = "".join(match)
-        if "*" not in match:
-            url = target + match
-            robots.add(url)
-        cprint("Robots.txt found", "blue")
-        print(robots)
 
-
-def get_intel(client: httpx.Client, url: str, response: str) -> None:
-    """Check link for intel, and if found, add link to intel dataset,
-    including but not limited to website accounts and AWS buckets.
+def get_intel(client: httpx.Client, url: str, response: object) -> None:
+    """Check link for intel (emails, S3 buckets, etc.).
 
     Args:
-        target (str): URL to be checked.
+        url (str): URL to be checked.
         response (object): Response object containing data to check.
     """
-    intel = set()
-    regex = r"""([\w\.-]+s[\w\.-]+\.amazonaws\.com)|([\w\.-]+@[\w\.-]+\.[\.\w]+)"""
-    matches = re.findall(regex, response)
-    print("Intel\n--------\n\n")
+    cprint("[*]Checking for intel", "yellow")
+    resp_text = response.text if hasattr(response, "text") else str(response)
+    intel_found = set()
+    regex = r"""([\w\.-]+s[\w\.-]*\.amazonaws\.com)|([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)"""
+    matches = re.findall(regex, resp_text)
     for match in matches:
-        intel.add(match)
+        for item in match:
+            if item:
+                intel_found.add(item)
+                intel.add(item)
+
+    print("Intel\n--------\n")
+    if intel_found:
+        for item in sorted(intel_found):
+            print("Found intel:", item)
+    else:
+        print("No external intel endpoints found")
 
 
-def get_dot_git(client: httpx.Client, target: str, response: str) -> None:
+def get_dot_git(client: httpx.Client, target: str, response: object) -> None:
     """Check link for .git folders exposed on public domain.
 
     Args:
@@ -168,48 +199,61 @@ def get_dot_git(client: httpx.Client, target: str, response: str) -> None:
         response (object): Response object containing data to check.
     """
     cprint("[*]Checking for .git folder", "yellow")
-    url = target
-    target = "{0.scheme}://{0.netloc}/".format(urlsplit(url))
-    resp = client.get(target + "/.git/config")
-    if resp.status_code != 404:
-        cprint("Alert!", "red")
-        cprint(".git folder exposed publicly", "red")
-    else:
+    parsed = urlsplit(target)
+    base_target = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    git_url = f"{base_target}/.git/config"
+    try:
+        resp = client.get(git_url)
+        if resp.status_code == 200 and ("core" in resp.text or "repositoryformatversion" in resp.text):
+            cprint("Alert!", "red")
+            cprint(".git folder exposed publicly", "red")
+        else:
+            cprint("NO .git folder found", "blue")
+    except Exception as exc:
+        logging.debug("Error checking .git: %s", exc)
         cprint("NO .git folder found", "blue")
 
 
-def get_bitcoin_address(client: httpx.Client, target: str, response: str) -> None:
+def get_bitcoin_address(client: httpx.Client, target: str, response: object) -> None:
     """Check link for Bitcoin addresses, and if found, print.
 
     Args:
         target (str): URL to be checked.
         response (object): Response object containing data to check.
     """
-    bitcoins = re.findall(r"^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$", response)
+    cprint("[*]Checking for Bitcoin addresses", "yellow")
+    resp_text = response.text if hasattr(response, "text") else str(response)
+    btc_pattern = r"\b([13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-zA-HJ-NP-Z0-9]{25,59})\b"
+    bitcoins = set(re.findall(btc_pattern, resp_text))
     print("BTC FOUND: ", len(bitcoins))
-    for bitcoin in bitcoins:
+    for bitcoin in sorted(bitcoins):
         print("BTC: ", bitcoin)
 
 
-def get_dot_svn(client: httpx.Client, target: str, response: str) -> None:
-    """Check link for .svn folders exposed on public domain=.
+def get_dot_svn(client: httpx.Client, target: str, response: object) -> None:
+    """Check link for .svn folders exposed on public domain.
 
     Args:
         target (str): URL to be checked.
         response (object): Response object containing data to check.
     """
     cprint("[*]Checking for .svn folder", "yellow")
-    url = target
-    target = "{0.scheme}://{0.netloc}/".format(urlsplit(url))
-    resp = client.get(target + "/.svn/entries")
-    if resp.status_code != 404:
-        cprint("Alert!", "red")
-        cprint(".SVN folder exposed publicly", "red")
-    else:
+    parsed = urlsplit(target)
+    base_target = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    svn_url = f"{base_target}/.svn/entries"
+    try:
+        resp = client.get(svn_url)
+        if resp.status_code == 200 and ("svn" in resp.text.lower() or "dir" in resp.text):
+            cprint("Alert!", "red")
+            cprint(".SVN folder exposed publicly", "red")
+        else:
+            cprint("NO .SVN folder found", "blue")
+    except Exception as exc:
+        logging.debug("Error checking .svn: %s", exc)
         cprint("NO .SVN folder found", "blue")
 
 
-def get_dot_htaccess(client: httpx.Client, target: str, response: str) -> None:
+def get_dot_htaccess(client: httpx.Client, target: str, response: object) -> None:
     """Check link for .htaccess files on public domain.
 
     Args:
@@ -217,17 +261,20 @@ def get_dot_htaccess(client: httpx.Client, target: str, response: str) -> None:
         response (object): Response object containing data to check.
     """
     cprint("[*]Checking for .htaccess", "yellow")
-    url = target
-    target = "{0.scheme}://{0.netloc}/".format(urlsplit(url))
-    resp = client.get(target + "/.htaccess")
-    if resp.status_code == 403:
-        cprint("403 Forbidden", "blue")
-    elif resp.status_code != 404 and resp.status_code != 500:
-        cprint("Alert!!", "blue")
-        cprint(".htaccess file found!", "blue")
-    else:
-        cprint("Response", "blue")
-        cprint(resp, "blue")
+    parsed = urlsplit(target)
+    base_target = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    htaccess_url = f"{base_target}/.htaccess"
+    try:
+        resp = client.get(htaccess_url)
+        if resp.status_code == 403:
+            cprint(".htaccess protected (403 Forbidden)", "blue")
+        elif resp.status_code == 200 and any(keyword in resp.text.lower() for keyword in ("rewriteengine", "authuserfile", "order deny,allow", "deny from")):
+            cprint("Alert!! .htaccess file found!", "red")
+        else:
+            cprint("NO .htaccess file found", "blue")
+    except Exception as exc:
+        logging.debug("Error checking .htaccess: %s", exc)
+        cprint("NO .htaccess file found", "blue")
 
 
 def display_webpage_description(soup: BeautifulSoup) -> None:
@@ -250,12 +297,13 @@ def writer(datasets, dataset_names, output_dir):
         dataset_names (list): Identifiers for each dataset.
         output_dir (str): Path where data file should be saved.
     """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
     for dataset, dataset_name in zip(datasets, dataset_names):
         if dataset:
-            filepath = output_dir + "/" + dataset_name + ".txt"
-
-            with open(filepath, "w+", encoding="utf8") as f:
-                f.write(str("\n".join(dataset)))
+            filepath = os.path.join(output_dir, f"{dataset_name}.txt")
+            with open(filepath, "w+", encoding="utf-8") as f:
+                f.write("\n".join(str(item) for item in sorted(dataset)))
                 f.write("\n")
             # else:
             #     with open(filepath, 'w+') as f:

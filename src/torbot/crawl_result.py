@@ -82,9 +82,25 @@ class CrawlResultAdapter:
         if terminal_status not in {"completed", "cancelled", "failed", "invalid"}:
             raise ValueError("unsupported terminal status")
         ended_at = datetime.now(timezone.utc)
-        pages = [self._page(node, include_text=include_text) for node in self.tree.all_nodes_itr()]
-        pages.extend(getattr(self.tree, "crawl_failures", []))
-        pages.sort(key=lambda page: (page["depth"], page["url"]))
+        # Display/export only unique, verified HTTP 200 pages
+        verified_pages = []
+        seen_urls = set()
+        for node in self.tree.all_nodes_itr():
+            if not getattr(node, "data", None):
+                continue
+            status = getattr(node.data, "status", None)
+            url = getattr(node, "identifier", None)
+            if status == 200 and url and url not in seen_urls:
+                seen_urls.add(url)
+                verified_pages.append(self._page(node, include_text=include_text))
+
+        # Include crawl_failures if any (for error contract fixtures / failure test cases)
+        verified_pages.extend(getattr(self.tree, "crawl_failures", []))
+        verified_pages.sort(key=lambda page: (page["depth"], page["url"]))
+
+        url_stats = getattr(self.tree, "get_url_stats", lambda: {})()
+        discovered_urls = getattr(self.tree, "get_discovered_urls_details", lambda: [])()
+
         result = {
             "schemaVersion": SCHEMA_VERSION,
             "runId": run_id or str(uuid4()),
@@ -97,7 +113,9 @@ class CrawlResultAdapter:
             "startedAt": self.started_at.isoformat().replace("+00:00", "Z"),
             "endedAt": ended_at.isoformat().replace("+00:00", "Z"),
             "durationMs": int((monotonic() - self._started_monotonic) * 1000),
-            "pages": pages,
+            "pages": verified_pages,
+            "stats": url_stats,
+            "discoveredUrls": discovered_urls,
             "diagnostics": _safe_diagnostics(diagnostics or {}),
         }
         return result
@@ -130,6 +148,12 @@ class CrawlResultAdapter:
                 "label": node.data.classification,
                 "accuracy": node.data.accuracy,
             },
+            "domainType": getattr(node.data, "domain_type", "Internal"),
+            "timestamp": getattr(node.data, "timestamp", None),
+            "unverifiedSsl": bool(
+                getattr(node.data, "unverified_ssl", False)
+                or (node.identifier.lower().startswith("https://") and ".onion" in node.identifier.lower())
+            ),
         }
         if include_text:
             text = getattr(node.data, "text", "")
@@ -146,10 +170,15 @@ class CrawlResultAdapter:
 
 
 def failed_page(
-    url: str, parent_url: str | None, depth: int, error: BaseException | str
+    url: str,
+    parent_url: str | None,
+    depth: int,
+    error: BaseException | str,
+    domain_type: str | None = None,
+    timestamp: str | None = None,
 ) -> dict[str, Any]:
     """Create a privacy-safe per-page failure record."""
-    return {
+    page = {
         "url": url,
         "parentUrl": parent_url,
         "depth": depth,
@@ -160,6 +189,11 @@ def failed_page(
         "links": [],
         "contacts": [],
     }
+    if domain_type is not None:
+        page["domainType"] = domain_type
+    if timestamp is not None:
+        page["timestamp"] = timestamp
+    return page
 
 
 def invalid_result(target: str, *, run_id: str | None = None) -> dict[str, Any]:

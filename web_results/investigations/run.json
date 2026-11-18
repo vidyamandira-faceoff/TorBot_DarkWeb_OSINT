@@ -1,0 +1,11 @@
+{
+  "createdAt": "2026-11-18T02:17:06.682475Z",
+  "endpointKind": "none",
+  "inputSha256": "9499b3a65adbe22ec731638248a9ae1581715b9d7168d76a6ed1782916731741",
+  "model": null,
+  "provider": "none",
+  "redactionsApplied": false,
+  "remoteContentAllowed": false,
+  "schema": "analyst-run.v1",
+  "warnings": []
+}

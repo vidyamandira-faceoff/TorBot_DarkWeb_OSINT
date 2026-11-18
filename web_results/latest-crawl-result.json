@@ -1,0 +1,65 @@
+{
+  "cancelled": false,
+  "diagnostics": {},
+  "discoveredUrls": [
+    {
+      "domainType": "Internal",
+      "isVerified200": true,
+      "status": 200,
+      "timestamp": "2026-11-18T08:01:54.183172Z",
+      "title": "Example Domain",
+      "unverifiedSsl": false,
+      "url": "https://example.com"
+    }
+  ],
+  "durationMs": 543,
+  "endedAt": "2026-11-18T08:01:54.724179Z",
+  "engine": "torbot",
+  "engineVersion": "4.3.1",
+  "pages": [
+    {
+      "classification": {
+        "accuracy": 0.41078449305541526,
+        "label": "Streaming Services"
+      },
+      "contacts": [],
+      "content": {
+        "mediaType": "text/plain",
+        "sha256": "06fe21c5fbf716d5b7fc1ef87cd418a375d9523ad36a951a1e3182a8f42526af",
+        "text": "Example Domain This domain is for use in documentation examples without needing permission. This is not a service; avoid relying on it for testing and monitoring purposes."
+      },
+      "depth": 0,
+      "domainType": "Internal",
+      "errorCategory": null,
+      "links": [],
+      "outcome": "fetched",
+      "parentUrl": null,
+      "skippedReason": null,
+      "status": 200,
+      "timestamp": "2026-11-18T08:01:54.183172Z",
+      "title": "Example Domain",
+      "unverifiedSsl": false,
+      "url": "https://example.com"
+    }
+  ],
+  "runId": "d36cc52c-5249-45c6-8838-4edc28dc0a84",
+  "schemaVersion": 1,
+  "settings": {
+    "maxDepth": 0,
+    "usesTor": false
+  },
+  "startedAt": "2026-11-18T08:01:54.183151Z",
+  "stats": {
+    "totalPages": 1,
+    "verifiedPages": 1,
+    "totalDiscoveredUrls": 1,
+    "uniqueDiscoveredUrls": 1,
+    "unverifiedOrNon200Urls": 0,
+    "unverifiedUrls": 0,
+    "statusCounts": {
+      "200": 1
+    }
+  },
+  "target": "https://example.com/",
+  "terminalStatus": "completed"
+}

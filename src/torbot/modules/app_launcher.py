@@ -45,6 +45,7 @@ def find_torbot_app(
     cwd = Path.cwd().resolve()
     candidates.extend(
         [
+            root / "TorBotApp",
             root.parent / "TorBotApp",
             cwd / "TorBotApp",
             cwd.parent / "TorBotApp",

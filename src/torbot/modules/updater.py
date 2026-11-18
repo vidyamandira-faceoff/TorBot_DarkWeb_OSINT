@@ -21,7 +21,7 @@ def check_version():
     branch_out = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True
     )
-    branch = branch_out.stdout
+    branch = branch_out.stdout.strip()
     if branch == "master":
         update_out = subprocess.run(
             ["git", "pull", "origin", "master"], capture_output=True, text=True
@@ -29,7 +29,7 @@ def check_version():
         if "Already up to date." in update_out.stdout:
             print("TorBot is already up-to-date.")
         else:
-            print("TorBot has succesfully updated to latest stable version.")
+            print("TorBot has successfully updated to latest stable version.")
     else:
         update_out = subprocess.run(
             ["git", "pull", "origin", "dev"], capture_output=True, text=True
@@ -37,4 +37,4 @@ def check_version():
         if "Already up to date." in update_out.stdout:
             print("TorBot is already up-to-date.")
         else:
-            print("TorBot has succesfully updated to latest stable version.")
+            print("TorBot has successfully updated to latest stable version.")

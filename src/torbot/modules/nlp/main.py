@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import List, Tuple, Union
 
 import numpy as np
+import joblib
 from bs4 import BeautifulSoup
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import SGDClassifier
@@ -87,8 +88,22 @@ def build_classifier(csv_path: Union[str, Path] = DEFAULT_DATASET_PATH) -> Pipel
 
 @lru_cache(maxsize=4)
 def get_classifier(csv_path: Union[str, Path] = DEFAULT_DATASET_PATH) -> Pipeline:
-    """Return a cached classifier for the requested dataset."""
-    return build_classifier(Path(csv_path).resolve())
+    """Return a cached classifier for the requested dataset, using a persisted joblib model if available."""
+    csv_p = Path(csv_path).resolve()
+    joblib_p = csv_p.with_suffix(".joblib")
+    if joblib_p.exists():
+        try:
+            if joblib_p.stat().st_mtime >= csv_p.stat().st_mtime:
+                return joblib.load(joblib_p)
+        except Exception:
+            pass
+
+    clf = build_classifier(csv_p)
+    try:
+        joblib.dump(clf, joblib_p)
+    except Exception:
+        pass
+    return clf
 
 
 def _prediction_score(classifier: Pipeline, text: str) -> float:
@@ -106,12 +121,20 @@ def _prediction_score(classifier: Pipeline, text: str) -> float:
 
 def classify(data: str) -> List[Union[str, float]]:
     """
-    Classify the supplied HTML and return [category, confidence].
+    Classify the supplied HTML or plain text and return [category, confidence].
 
     The confidence value is model confidence for the selected category, not a
     model-wide accuracy score.
     """
-    text = extract_text(data)
+    if not data or not data.strip():
+        return ["unknown", 0.0]
+
+    # Fast-path: if text is already extracted and does not contain HTML tags, avoid re-parsing with BeautifulSoup
+    if "<html" not in data.lower() and "<body" not in data.lower() and "<div" not in data.lower() and "<p" not in data.lower():
+        text = " ".join(data.split())
+    else:
+        text = extract_text(data)
+
     if not text:
         return ["unknown", 0.0]
 
@@ -119,3 +142,4 @@ def classify(data: str) -> List[Union[str, float]]:
     prediction = classifier.predict([text])[0]
     confidence = _prediction_score(classifier, text)
     return [str(prediction), confidence]
+

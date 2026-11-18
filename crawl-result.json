@@ -1,0 +1,67 @@
+{
+  "cancelled": false,
+  "diagnostics": {},
+  "discoveredUrls": [
+    {
+      "domainType": "Internal",
+      "isVerified200": true,
+      "status": 200,
+      "timestamp": "2026-11-18T07:33:59.348764Z",
+      "title": "example.com",
+      "unverifiedSsl": false,
+      "url": "https://example.com"
+    }
+  ],
+  "durationMs": 5825,
+  "endedAt": "2026-11-18T07:34:05.172740Z",
+  "engine": "torbot",
+  "engineVersion": "4.3.1",
+  "pages": [
+    {
+      "classification": {
+        "accuracy": 0.6895355945246922,
+        "label": "Streaming Services"
+      },
+      "contacts": [],
+      "content": {
+        "mediaType": "text/plain",
+        "sha256": "e9292180546050550790b7a6fb7abe51cb2217dc6c3bede70f5c08718491513b",
+        "text": "\u0013@\u0002\u0000\ufffd\ufffd\ufffd\u069eeRr\ufffd\ufffdT`\ufffdy\ufffd\ufffd\u8084\ufffd|\ufffd\ufffdn\ufffd\ufffd\ufffdl\ufffd\ufffd\u00a2\ufffd\ufffdw\u0014\ufffd\ufffd\u0001\u0005\u0014\ufffd\ufffdP`\ufffdz>\u0007\"\ufffd\u03b7V\ufffd\u001a\ufffd\ufffd&\ufffd\udb68\udf87\u0006I8\ufffd \ufffd\u001b\ufffdgF\ufffd\ufffd\ufffd\ufffd\ufffd\u000f\ufffd\ufffd^h@\ufffd\ufffdTU\ufffd\ufffd\ufffdh\ufffd\ufffd<\ufffd\ufffd(\ufffd\u0004F\ufffd\ufffd[>\b\ufffd\ufffd\ufffd>\ufffd26\ufffd\ufffd\u007f,\ufffd3\ufffd\ufffdPT\" \ufffd\u068a\\\u0664\u001b\ufffd\ufffd d\ufffd\ufffdO\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\u0010 \ufffd\ufffd(\ufffd\ufffdr\ufffd\ufffd\ufffd#\ufffd\ufffd\ufffd+\u0000\ufffdW\ufffd\ufffd\ufffd\u001ba\ufffd\\\u054e \ufffd\ufffd\ufffd\ufffd\ufffduK \ufffd\ufffd\ufffd\ufffdQi\ufffd$\ufffd\u0004:p\\n!:\u0010\ufffdc\ufffd\ufffd\ufffd\u0281^Yn\ufffd2-!\ufffd\ufffd\ufffd1\ufffd4\ufffd\ufffdE\u000e\ufffd \ufffd\u001b\ufffd\ufffd;H>\"\ufffd\u000e4\ufffd VJ\ufffd\ufffd\u0004j\u0478*e\ufffdI( Q \ufffd\ufffdt\ufffd\ufffdk\ue1b4\u001aE\u049d;v\ufffd\ufffdU9\u0440\ufffd\ufffd\ufffdRUb[\ufffd\u6ee1\ufffd\ufffd'\ufffd\ufffdcf\u00124\ufffd\ufffd\ufffd}s\ufffd*\ufffdk\u0010g\ufffd\ufffd\ufffd\ufffd1\ufffd\ufffdnQ(\ufffdN\ufffd\ufffdlR\ufffd"
+      },
+      "depth": 0,
+      "domainType": "Internal",
+      "errorCategory": null,
+      "links": [],
+      "outcome": "fetched",
+      "parentUrl": null,
+      "skippedReason": null,
+      "status": 200,
+      "timestamp": "2026-11-18T07:33:59.348764Z",
+      "title": "example.com",
+      "unverifiedSsl": false,
+      "url": "https://example.com"
+    }
+  ],
+  "runId": "6b8ad1f0-b492-49c6-af14-2028fc6b5ca4",
+  "schemaVersion": 1,
+  "settings": {
+    "maxDepth": 1,
+    "usesTor": true
+  },
+  "startedAt": "2026-11-18T07:33:59.348735Z",
+  "stats": {
+    "externalDiscovered": 0,
+    "internalDiscovered": 1,
+    "statusCounts": {
+      "200": 1
+    },
+    "totalDiscoveredUrls": 1,
+    "totalPages": 1,
+    "uniqueDiscoveredUrls": 1,
+    "unverifiedOrNon200Urls": 0,
+    "unverifiedUrls": 0,
+    "verifiedPages": 1
+  },
+  "target": "https://example.com/",
+  "terminalStatus": "completed"
+}

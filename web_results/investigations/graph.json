@@ -1,0 +1,14 @@
+{
+  "edges": [],
+  "nodes": [
+    {
+      "evidenceIds": [
+        "ev-68d88373797f1566"
+      ],
+      "id": "page-a7e6406d4674ec5c",
+      "type": "page",
+      "value": "https://example.com"
+    }
+  ],
+  "schema": "evidence-graph.v1"
+}
