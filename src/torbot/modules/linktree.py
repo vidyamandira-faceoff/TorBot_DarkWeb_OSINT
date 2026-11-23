@@ -43,6 +43,7 @@ class LinkNode(Node):
         text: str = "",
         domain_type: str = "Internal",
         timestamp: str | None = None,
+        discovered_links: list[str] | None = None,
     ):
         super().__init__()
         self.identifier = url
@@ -56,6 +57,7 @@ class LinkNode(Node):
         self.domain_type = domain_type
         self.timestamp = timestamp
         self.content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        self.discovered_links = list(discovered_links) if discovered_links else []
 
 
 def is_internal_url(base_url: str, candidate_url: str) -> bool:
@@ -222,6 +224,7 @@ class LinkTree(Tree):
         self.external_links: set[str] = set()
         self.discovered_urls: set[str] = set()
         self.discovered_urls_raw: list[str] = []
+        self.discovered_by_depth: dict[int, list[dict[str, Any]]] = {lvl: [] for lvl in range(6)}
         self.verified_200_urls: set[str] = set()
         self.unverified_urls: list[dict[str, Any]] = []
         self.unverified_ssl_urls: set[str] = set()
@@ -480,27 +483,19 @@ class LinkTree(Tree):
     def _build_tree(self, url: str, depth: int) -> None:
         """
         Builds a tree from the root to the given depth using a bounded breadth-first queue.
+        Crawls step by step from Depth 0 to Depth 5, tracking all discovered links at each level.
         """
-        if depth <= 0:
-            return
-
         try:
             start_depth = self.depth(url)
         except Exception:
             start_depth = 0
 
-        max_target_depth = start_depth + depth
+        target_depth = max(0, min(5, depth))
+        max_target_depth = start_depth + target_depth
         queue = deque([(url, start_depth)])
 
         while queue:
             curr_url, curr_depth = queue.popleft()
-
-            if curr_depth >= max_target_depth:
-                continue
-
-            if len(self.all_nodes()) >= self._max_pages:
-                logging.info("Reached maximum crawl page limit (%d)", self._max_pages)
-                break
 
             # Retrieve cached HTML or fetch if missing
             html = self._html_cache.get(curr_url)
@@ -527,11 +522,49 @@ class LinkTree(Tree):
 
             base_url = curr_url if getattr(self, "_resolve_relative", False) else None
             discovered_links = parse_links(html, base_url=base_url)
+
+            # Assign discovered links directly to LinkNode so each page knows its links
+            node = self.get_node(curr_url)
+            if node and getattr(node, "data", None):
+                node.data.discovered_links = list(discovered_links)
+
+            # Record discovered links at this specific depth level
+            if curr_depth not in self.discovered_by_depth:
+                self.discovered_by_depth[curr_depth] = []
+
+            seen_at_this_level = {d["url"] for d in self.discovered_by_depth[curr_depth]}
+
             for raw_link in discovered_links:
                 self.discovered_urls_raw.append(raw_link)
                 clean_link, _ = parse.urldefrag(raw_link)
-                if clean_link:
-                    self.discovered_urls.add(clean_link)
+                if not clean_link:
+                    continue
+                self.discovered_urls.add(clean_link)
+
+                is_internal = is_internal_url(self._url, clean_link)
+                if is_internal:
+                    self.internal_links.add(clean_link)
+                else:
+                    self.external_links.add(clean_link)
+
+                if clean_link not in seen_at_this_level:
+                    seen_at_this_level.add(clean_link)
+                    cached_st = self._response_cache.get(clean_link, (None,))[0]
+                    self.discovered_by_depth[curr_depth].append({
+                        "url": clean_link,
+                        "parentUrl": curr_url,
+                        "depth": curr_depth,
+                        "domainType": "Internal" if is_internal else "External",
+                        "status": cached_st,
+                    })
+
+            # If we've reached max_target_depth, do NOT expand or fetch child pages
+            if curr_depth >= max_target_depth:
+                continue
+
+            if len(self.all_nodes()) >= self._max_pages:
+                logging.info("Reached maximum crawl page limit (%d)", self._max_pages)
+                break
 
             # Deduplicate links while preserving order
             unique_links = []
@@ -575,10 +608,6 @@ class LinkTree(Tree):
                     continue
 
                 is_internal = is_internal_url(self._url, child)
-                if is_internal:
-                    self.internal_links.add(child)
-                else:
-                    self.external_links.add(child)
 
                 # Attempt to append node
                 try:
@@ -612,7 +641,7 @@ class LinkTree(Tree):
                 if (
                     child_status == 200
                     and (is_internal or self._crawl_external)
-                    and (curr_depth + 1 < max_target_depth)
+                    and (curr_depth + 1 <= max_target_depth)
                 ):
                     queue.append((child, curr_depth + 1))
 
@@ -632,9 +661,36 @@ class LinkTree(Tree):
                     pages.append(node)
         return pages
 
+    def get_discovered_links_by_level(self) -> dict[int, list[dict[str, Any]]]:
+        """Return all discovered links organized by depth level (0 to 5) with updated statuses."""
+        result: dict[int, list[dict[str, Any]]] = {}
+        for lvl in range(6):
+            items = self.discovered_by_depth.get(lvl, [])
+            updated_items = []
+            for item in items:
+                u = item.get("url")
+                st = item.get("status")
+                if st is None and u in self._response_cache:
+                    st = self._response_cache[u][0]
+                updated_items.append({
+                    "url": u,
+                    "parentUrl": item.get("parentUrl"),
+                    "depth": item.get("depth", lvl),
+                    "domainType": item.get("domainType", "Internal"),
+                    "status": st if st is not None else "Discovered",
+                })
+            result[lvl] = updated_items
+        return result
+
     def get_url_stats(self) -> dict[str, Any]:
         """Return comprehensive discovered URL statistics for internal debugging."""
         verified = self.get_verified_pages()
+        by_level = self.get_discovered_links_by_level()
+        depth_breakdown = {
+            str(lvl): len(links)
+            for lvl, links in by_level.items()
+            if links
+        }
         return {
             "totalPages": len(verified),
             "verifiedPages": len(verified),
@@ -645,6 +701,7 @@ class LinkTree(Tree):
             "statusCounts": dict(self.status_counts),
             "internalDiscovered": len(self.internal_links),
             "externalDiscovered": len(self.external_links),
+            "discoveredUrlsByDepth": depth_breakdown,
         }
 
     def get_discovered_urls_details(self) -> list[dict[str, Any]]:
@@ -656,12 +713,17 @@ class LinkTree(Tree):
                 continue
             seen.add(node.identifier)
             status = getattr(node.data, "status", None)
+            try:
+                d_val = self.depth(node.identifier)
+            except Exception:
+                d_val = 0
             details.append({
                 "url": node.identifier,
                 "status": status,
                 "title": getattr(node, "tag", None),
                 "domainType": getattr(node.data, "domain_type", "Internal"),
                 "timestamp": getattr(node.data, "timestamp", None),
+                "depth": d_val,
                 "isVerified200": status == 200,
                 "unverifiedSsl": getattr(node.data, "unverified_ssl", False),
             })
@@ -675,9 +737,26 @@ class LinkTree(Tree):
                     "title": None,
                     "domainType": u.get("domainType", "External"),
                     "timestamp": None,
+                    "depth": u.get("depth", 1),
                     "isVerified200": False,
                     "unverifiedSsl": False,
                 })
+        by_level = self.get_discovered_links_by_level()
+        for lvl, links in by_level.items():
+            for link in links:
+                u_str = link.get("url")
+                if u_str and u_str not in seen:
+                    seen.add(u_str)
+                    details.append({
+                        "url": u_str,
+                        "status": link.get("status"),
+                        "title": None,
+                        "domainType": link.get("domainType", "Internal"),
+                        "timestamp": None,
+                        "depth": lvl,
+                        "isVerified200": link.get("status") == 200,
+                        "unverifiedSsl": False,
+                    })
         return details
 
     def _incremental_save(self, terminal_status: str | None = None) -> None:
@@ -803,23 +882,69 @@ class LinkTree(Tree):
         """
         print(self._to_json())
 
+    def showDiscoveredLinksByLevel(self) -> None:
+        """
+        Displays all discovered links grouped and formatted by depth level (0 to 5).
+        """
+        print(color("\n" + "=" * 80, "cyan"))
+        print(color("  DISCOVERED LINKS BREAKDOWN BY LEVEL (DEPTH 0 TO 5)", "cyan"))
+        print(color("=" * 80, "cyan"))
+
+        has_any = False
+        by_level = self.get_discovered_links_by_level()
+        for lvl in range(6):
+            links = by_level.get(lvl, [])
+            if not links:
+                continue
+            has_any = True
+            print(color(f"\n[+] Level {lvl} (Depth {lvl}) - Discovered {len(links)} link(s):", "green"))
+            level_table = []
+            for i, item in enumerate(links[:50], 1):
+                st = item.get("status")
+                st_str = f"HTTP {st}" if isinstance(st, int) else (str(st) if st else "Discovered")
+                level_table.append([
+                    i,
+                    item.get("url"),
+                    item.get("domainType", "Internal"),
+                    st_str,
+                    item.get("parentUrl", "N/A"),
+                ])
+            headers = ["#", "Discovered URL", "Type", "Status", "Source / Parent URL"]
+            print(tabulate(level_table, headers=headers))
+            if len(links) > 50:
+                print(color(f"    ... and {len(links) - 50} more links at Level {lvl}", "yellow"))
+
+        if not has_any:
+            print(color("No outgoing links discovered at crawled levels.", "yellow"))
+        print()
+
     def showTable(self) -> None:
         """
-        Prints the status of a link based on its connection status
+        Prints the status of a link based on its connection status and discovered links by level.
         """
-        nodes = self.all_nodes_itr()
+        nodes = list(self.all_nodes_itr())
+        def _get_depth(n):
+            try:
+                return self.depth(n.identifier)
+            except Exception:
+                return 0
+        nodes.sort(key=lambda n: (_get_depth(n), n.identifier))
         table_data = []
 
         def insert(node, color_code):
             status = str(node.data.status)
             code = http.client.responses.get(node.data.status, "")
             status_message = f"{status} {code}".strip()
+            d_val = _get_depth(node)
+            disc_count = len(getattr(node.data, "discovered_links", []))
             table_data.append(
                 [
                     node.tag,
                     node.identifier,
                     getattr(node.data, "domain_type", "Internal"),
+                    d_val,
                     color(status_message, color_code),
+                    disc_count,
                     node.data.numbers,
                     node.data.emails,
                     node.data.classification,
@@ -842,7 +967,9 @@ class LinkTree(Tree):
             "Title",
             "URL",
             "Domain Type",
+            "Depth",
             "Status",
+            "Discovered",
             "Phone Numbers",
             "Emails",
             "Category",
@@ -850,6 +977,9 @@ class LinkTree(Tree):
         ]
         table = tabulate(table_data, headers=headers)
         print(table)
+
+        # Print discovered links breakdown by level (Depth 0 to Depth 5)
+        self.showDiscoveredLinksByLevel()
 
 
 def parse_hostname(url: str) -> str:

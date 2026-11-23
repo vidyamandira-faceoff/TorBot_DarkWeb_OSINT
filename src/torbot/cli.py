@@ -94,6 +94,60 @@ def normalize_url(url: str, disable_socks: bool = False) -> str:
     return f"https://duckduckgogg42xjoc72x3sjasowoarfbgcmvfimaftt6twagswzczad.onion/html/?q={q}"
 
 
+def parse_urls_input(raw: str | list[str] | None) -> list[str]:
+    """Parse, split, and normalize raw user URL input into a list of up to 10 URLs.
+
+    Accepts:
+    - Single URL string
+    - Multiple URLs separated by newlines, commas, semicolons, or whitespace
+    - A list of URL strings
+    Returns at most 10 unique, non-empty URL targets.
+    """
+    if not raw:
+        return []
+
+    tokens: list[str] = []
+    if isinstance(raw, str):
+        # Split on newlines, commas, semicolons
+        import re
+        parts = re.split(r"[\r\n,;]+", raw)
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # If the part contains spaces, check if it contains multiple URLs or a single query
+            if " " in part:
+                sub_parts = part.split()
+                if any(
+                    s.startswith(("http://", "https://"))
+                    or ".onion" in s.lower()
+                    or ("." in s and "/" in s)
+                    for s in sub_parts
+                ):
+                    for sub in sub_parts:
+                        sub = sub.strip()
+                        if sub:
+                            tokens.append(sub)
+                else:
+                    tokens.append(part)
+            else:
+                tokens.append(part)
+    elif isinstance(raw, (list, tuple)):
+        for item in raw:
+            tokens.extend(parse_urls_input(item))
+
+    # De-duplicate while preserving order
+    seen = set()
+    unique_urls = []
+    for t in tokens:
+        cleaned = t.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            unique_urls.append(cleaned)
+
+    return unique_urls[:10]
+
+
 def run(arg_parser: argparse.ArgumentParser, version: str) -> None:
     args = arg_parser.parse_args()
 
@@ -143,32 +197,29 @@ def run(arg_parser: argparse.ArgumentParser, version: str) -> None:
         arg_parser.print_help()
         sys.exit()
 
-    args.url = normalize_url(args.url, disable_socks=args.disable_socks5)
+    raw_targets = parse_urls_input(args.url)
+    if not raw_targets:
+        arg_parser.print_help()
+        sys.exit()
 
-    is_onion = ".onion" in args.url.lower()
+    if len(raw_targets) > 10:
+        print(color(f"[*] Notice: Maximum 10 URLs allowed per run. Testing the first 10 targets.", "yellow"))
+        raw_targets = raw_targets[:10]
 
-    # Reject invalid onion URLs immediately
-    if is_onion:
-        valid_onion, onion_err = validate_onion_url(args.url)
-        if not valid_onion:
-            print(color(f"[-] Error: Invalid .onion URL: {onion_err}", "red"))
-            if args.save == "result":
-                from torbot.crawl_result import invalid_result
-                inv_res = invalid_result(args.url)
-                inv_res["diagnostics"] = {"error": onion_err or "Invalid .onion URL"}
-                write_crawl_result(args.result_file, inv_res)
-            sys.exit(1)
+    targets = [normalize_url(u, disable_socks=args.disable_socks5) for u in raw_targets]
 
-        if args.disable_socks5:
-            print(color("[*] Warning: .onion addresses require Tor proxy. Ignoring --disable-socks5.", "yellow"))
-            args.disable_socks5 = False
+    has_onion = any(".onion" in u.lower() for u in targets)
+
+    if has_onion and args.disable_socks5:
+        print(color("[*] Warning: .onion addresses require Tor proxy. Ignoring --disable-socks5.", "yellow"))
+        args.disable_socks5 = False
 
     socks5_host = args.host
     socks5_port = str(args.port)
     socks5_proxy = f"socks5://{socks5_host}:{socks5_port}"
 
     # Pre-check Tor SOCKS5 proxy availability when targeting dark web (.onion)
-    if is_onion:
+    if has_onion:
         try:
             with socket.create_connection((socks5_host, int(socks5_port)), timeout=3.0):
                 pass
@@ -186,27 +237,22 @@ def run(arg_parser: argparse.ArgumentParser, version: str) -> None:
                     "runId": str(uuid4()),
                     "engine": ENGINE,
                     "engineVersion": version,
-                    "target": args.url,
+                    "target": targets[0],
+                    "targets": targets,
                     "settings": {"maxDepth": args.depth, "usesTor": True},
                     "terminalStatus": "failed",
                     "cancelled": False,
                     "startedAt": now_str,
                     "endedAt": now_str,
                     "durationMs": 0,
-                    "pages": [failed_page(args.url, None, 0, "proxy offline", domain_type="Internal", timestamp=now_str)],
+                    "pages": [failed_page(t, None, 0, "proxy offline", domain_type="Internal", timestamp=now_str) for t in targets],
                     "diagnostics": {"error": f"Tor proxy unreachable on {socks5_host}:{socks5_port}"},
                 }
                 write_crawl_result(args.result_file, fail_res)
             sys.exit(1)
 
-    req_timeout = httpx.Timeout(35.0, connect=20.0) if is_onion else httpx.Timeout(20.0, connect=10.0)
+    req_timeout = httpx.Timeout(35.0, connect=20.0) if has_onion else httpx.Timeout(20.0, connect=10.0)
 
-    # Scoped transport configuration:
-    # 1. Tor onion routing provides end-to-end cryptographic authentication and transport encryption.
-    # 2. Public CAs do not issue TLS certificates for .onion domains; onion services using TLS almost universally use self-signed certificates.
-    # 3. Handle self-signed certificates safely and ONLY within the scoped .onion transport (verify=False for all://*.onion).
-    # 4. Standard clearnet HTTPS requests strictly preserve normal CA certificate verification (verify=True).
-    # 5. All .onion requests are always routed through the Tor SOCKS5 proxy (socks5://host:port).
     onion_transport = httpx.HTTPTransport(
         proxy=socks5_proxy,
         verify=False,
@@ -214,14 +260,14 @@ def run(arg_parser: argparse.ArgumentParser, version: str) -> None:
     default_proxy = socks5_proxy if not args.disable_socks5 else None
     default_transport = httpx.HTTPTransport(
         proxy=default_proxy,
-        verify=True,  # Normal HTTPS certificate verification preserved for all regular websites
+        verify=True,
     )
     mounts = {
         "all://*.onion": onion_transport,
         "all://": default_transport,
     }
 
-    if is_onion and not args.quiet:
+    if has_onion and not args.quiet:
         print(color("[*] Scoped .onion transport active: routed via Tor SOCKS5 proxy with self-signed TLS support.", "cyan"))
         print(color("[*] Note: .onion TLS certificate verification is bypassed (cryptographic security is provided by Tor onion routing).", "yellow"))
 
@@ -235,58 +281,187 @@ def run(arg_parser: argparse.ArgumentParser, version: str) -> None:
             print_header(version)
             print_tor_ip_address(client)
 
-        if args.info:
-            execute_all(client, args.url)
+        trees: list[LinkTree] = []
 
-        tree = LinkTree(
-            url=args.url,
-            depth=args.depth,
-            client=client,
-            resolve_relative=getattr(args, "resolve_relative", False),
-            crawl_external=getattr(args, "crawl_external", False),
-            max_pages=getattr(args, "max_pages", 100),
-            result_file=args.result_file if args.save == "result" else None,
-            uses_tor=not args.disable_socks5,
-        )
-        try:
-            tree.load()
-        finally:
-            if args.save == "result" and (tree.root is not None or tree.crawl_failures):
-                try:
-                    result = tree.to_crawl_result(
-                        uses_tor=not args.disable_socks5,
-                        include_text=True,
-                    )
-                    write_crawl_result(args.result_file, result)
-                    print(f"Crawl result written to {Path(args.result_file).resolve()}")
-                except Exception as exc:
-                    logging.warning("Failed to save crawl result: %s", exc)
+        for idx, target_url in enumerate(targets, 1):
+            if not args.quiet or len(targets) > 1:
+                print(color(f"\n================================================================================", "cyan"))
+                print(color(f"[*] Target {idx}/{len(targets)}: {target_url} (Max Depth: {args.depth})", "cyan"))
+                print(color(f"================================================================================", "cyan"))
 
-        if tree.root is None:
-            fail_msg = getattr(tree, "crawl_failure_message", None) or "Unable to fetch seed URL"
-            print(color(f"[-] Crawl failed: {fail_msg}", "red"))
+            is_target_onion = ".onion" in target_url.lower()
+            if is_target_onion:
+                valid_onion, onion_err = validate_onion_url(target_url)
+                if not valid_onion:
+                    print(color(f"[-] Error: Invalid .onion URL '{target_url}': {onion_err}", "red"))
+                    if len(targets) == 1:
+                        if args.save == "result":
+                            from torbot.crawl_result import invalid_result
+                            inv_res = invalid_result(target_url)
+                            inv_res["diagnostics"] = {"error": onion_err or "Invalid .onion URL"}
+                            write_crawl_result(args.result_file, inv_res)
+                        sys.exit(1)
+                    continue
+
+            if args.info:
+                execute_all(client, target_url)
+
+            tree = LinkTree(
+                url=target_url,
+                depth=args.depth,
+                client=client,
+                resolve_relative=getattr(args, "resolve_relative", False),
+                crawl_external=getattr(args, "crawl_external", False),
+                max_pages=getattr(args, "max_pages", 100),
+                result_file=args.result_file if (args.save == "result" and len(targets) == 1) else None,
+                uses_tor=not args.disable_socks5,
+            )
+            try:
+                tree.load()
+            finally:
+                if len(targets) == 1 and args.save == "result" and (tree.root is not None or tree.crawl_failures):
+                    try:
+                        result = tree.to_crawl_result(
+                            uses_tor=not args.disable_socks5,
+                            include_text=True,
+                        )
+                        write_crawl_result(args.result_file, result)
+                        print(f"Crawl result written to {Path(args.result_file).resolve()}")
+                    except Exception as exc:
+                        logging.warning("Failed to save crawl result: %s", exc)
+
+            trees.append(tree)
+
+            if tree.root is None:
+                fail_msg = getattr(tree, "crawl_failure_message", None) or "Unable to fetch seed URL"
+                print(color(f"[-] Crawl failed for {target_url}: {fail_msg}", "red"))
+                if len(targets) == 1:
+                    sys.exit(1)
+                continue
+
+            # save data if desired
+            if args.save == "tree":
+                tree.save()
+            elif args.save == "json":
+                tree.saveJSON()
+
+            if args.html == "display":
+                fetch_html(client, target_url, tree)
+            elif args.html == "save":
+                fetch_html(client, target_url, tree, save_html=True)
+
+            # always print something, table is the default
+            if args.visualize == "table" or not args.visualize:
+                tree.showTable()
+            elif args.visualize == "tree":
+                print(tree)
+            elif args.visualize == "json":
+                tree.showJSON()
+
+        # If multiple targets and save result was requested, write aggregated results
+        if len(targets) > 1 and args.save == "result":
+            try:
+                merged = _merge_crawl_results(trees, targets, args, version)
+                write_crawl_result(args.result_file, merged)
+                print(f"Aggregated crawl result for {len(targets)} targets written to {Path(args.result_file).resolve()}")
+            except Exception as exc:
+                logging.warning("Failed to save multi-target crawl result: %s", exc)
+
+        if all(t.root is None for t in trees) and len(trees) > 0:
             sys.exit(1)
 
-        # save data if desired
-        if args.save == "tree":
-            tree.save()
-        elif args.save == "json":
-            tree.saveJSON()
-
-        if args.html == "display":
-            fetch_html(client, args.url, tree)
-        elif args.html == "save":
-            fetch_html(client, args.url, tree, save_html=True)
-
-        # always print something, table is the default
-        if args.visualize == "table" or not args.visualize:
-            tree.showTable()
-        elif args.visualize == "tree":
-            print(tree)
-        elif args.visualize == "json":
-            tree.showJSON()
-
     print("\n\n")
+
+
+def _merge_crawl_results(trees: list[LinkTree], targets: list[str], args: argparse.Namespace, version: str) -> dict:
+    """Merge crawl results from multiple LinkTrees into a unified crawl-result shape."""
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    from torbot.crawl_result import SCHEMA_VERSION, ENGINE
+
+    all_pages = []
+    seen_page_urls = set()
+    all_discovered_urls = []
+    seen_disc_urls = set()
+    combined_discovered_by_depth: dict[str, list] = {str(i): [] for i in range(6)}
+    seen_by_depth: dict[str, set] = {str(i): set() for i in range(6)}
+
+    status_counts: dict[int, int] = {}
+    internal_count = 0
+    external_count = 0
+    has_completed = False
+    earliest_start = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    for tree in trees:
+        t_res = tree.to_crawl_result(uses_tor=not args.disable_socks5, include_text=True)
+        if t_res.get("terminalStatus") == "completed":
+            has_completed = True
+        for p in t_res.get("pages", []):
+            u = p.get("url")
+            if u and u not in seen_page_urls:
+                seen_page_urls.add(u)
+                all_pages.append(p)
+                st = p.get("status")
+                if isinstance(st, int):
+                    status_counts[st] = status_counts.get(st, 0) + 1
+
+        for d in t_res.get("discoveredUrls", []):
+            du = d.get("url")
+            if du and du not in seen_disc_urls:
+                seen_disc_urls.add(du)
+                all_discovered_urls.append(d)
+
+        by_depth = t_res.get("discoveredByDepth", {})
+        for lvl_str, links in by_depth.items():
+            if lvl_str not in combined_discovered_by_depth:
+                combined_discovered_by_depth[lvl_str] = []
+                seen_by_depth[lvl_str] = set()
+            for link in links:
+                lu = link.get("url")
+                if lu and lu not in seen_by_depth[lvl_str]:
+                    seen_by_depth[lvl_str].add(lu)
+                    combined_discovered_by_depth[lvl_str].append(link)
+
+        internal_count += len(getattr(tree, "internal_links", set()))
+        external_count += len(getattr(tree, "external_links", set()))
+
+    now_str = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    depth_counts = {
+        lvl: len(links) for lvl, links in combined_discovered_by_depth.items() if links
+    }
+
+    url_stats = {
+        "totalPages": len(all_pages),
+        "verifiedPages": len(all_pages),
+        "totalDiscoveredUrls": max(len(seen_disc_urls), len(all_pages)),
+        "uniqueDiscoveredUrls": len(seen_disc_urls) or len(all_pages),
+        "unverifiedUrls": max(0, len(seen_disc_urls) - len(all_pages)),
+        "unverifiedOrNon200Urls": max(0, len(seen_disc_urls) - len(all_pages)),
+        "statusCounts": status_counts,
+        "internalDiscovered": internal_count,
+        "externalDiscovered": external_count,
+        "discoveredUrlsByDepth": depth_counts,
+    }
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "runId": str(uuid4()),
+        "engine": ENGINE,
+        "engineVersion": version,
+        "target": targets[0],
+        "targets": targets,
+        "settings": {"maxDepth": args.depth, "usesTor": not args.disable_socks5, "targetCount": len(targets)},
+        "terminalStatus": "completed" if has_completed else "failed",
+        "cancelled": False,
+        "startedAt": earliest_start,
+        "endedAt": now_str,
+        "durationMs": 0,
+        "pages": all_pages,
+        "stats": url_stats,
+        "discoveredUrls": all_discovered_urls,
+        "discoveredByDepth": {k: v for k, v in combined_discovered_by_depth.items() if v},
+        "diagnostics": {"targetsTested": str(len(targets))},
+    }
 
 
 def set_arguments() -> argparse.ArgumentParser:
@@ -310,9 +485,11 @@ def set_arguments() -> argparse.ArgumentParser:
     parser.add_argument(
         "-u",
         "--url",
-        type=str,
+        "--urls",
+        action="extend",
+        nargs="+",
         default=None,
-        help="Specifiy a website link to crawl",
+        help="Specify one or more website links to crawl (up to 10 URLs)",
     )
     parser.add_argument(
         "--depth", type=int, help="Specifiy max depth of crawler (default 1)", default=1

@@ -402,10 +402,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             margin-left: 6px;
         }
 
-        input[type="text"], input[type="number"] {
+        textarea, .form-textarea, input[type="text"], input[type="number"] {
             width: 100%;
-            height: 48px;
-            min-height: 48px;
             padding: 10px 14px;
             background: var(--bg-input);
             border: 1.5px solid var(--border-color);
@@ -415,11 +413,44 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             outline: none;
             transition: all 0.2s ease;
             box-sizing: border-box;
+            font-family: inherit;
         }
 
-        input[type="text"]:focus, input[type="number"]:focus {
+        input[type="text"], input[type="number"] {
+            height: 48px;
+            min-height: 48px;
+        }
+
+        textarea.form-textarea {
+            min-height: 72px;
+            resize: vertical;
+            line-height: 1.5;
+        }
+
+        textarea:focus, .form-textarea:focus, input[type="text"]:focus, input[type="number"]:focus {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .depth-filter-btn {
+            background: rgba(15, 23, 42, 0.7);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .depth-filter-btn:hover {
+            border-color: var(--accent);
+            color: var(--text-main);
+        }
+        .depth-filter-btn.active {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: var(--accent);
+            color: var(--accent);
+            font-weight: 600;
         }
 
         /* Explicit, highly legible Dropdown Selectors and Options */
@@ -1090,15 +1121,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             <form method="POST" id="recon-form" action="/">
                 <div class="form-group">
-                    <label for="url">Target Link / .Onion Address / Dark Web Search: <span class="label-hint">(URL, .onion, or search keyword)</span></label>
-                    <input type="text" id="url" name="url" placeholder="Enter .onion address, URL, or dark web search query (e.g. cyber, market, hidden wiki)..." value="{{ request.form.get('url', '') }}" required>
+                    <label for="url">Target Link(s) / .Onion Addresses (Test up to 10 URLs): <span class="label-hint">(Enter up to 10 URLs or .onion addresses, separated by commas or newlines)</span></label>
+                    <textarea id="url" name="url" rows="3" class="form-textarea" placeholder="Enter up to 10 .onion addresses, URLs, or search queries (separated by commas or newlines)...&#10;e.g.&#10;https://example.com&#10;http://target.onion" required>{{ request.form.get('url', '') }}</textarea>
                 </div>
 
                 <div class="grid-2">
                     <div class="form-group">
-                        <label for="depth">Crawl Depth: <span class="label-hint">(0 = Single URL, 1 = Direct links, 2 = 2 levels)</span></label>
+                        <label for="depth">Crawl Depth: <span class="label-hint">(Step-by-step from Depth 0 to Depth 5)</span></label>
                         <select id="depth" name="depth">
-                            <option value="0" {% if request.form.get('depth') == '0' %}selected{% endif %}>Depth 0 - Single URL Only (Fastest)</option>
+                            <option value="0" {% if request.form.get('depth') == '0' %}selected{% endif %}>Depth 0 - Single URL Only (Level 0 Discovered Links)</option>
                             <option value="1" {% if request.form.get('depth') == '1' or not request.form.get('depth') %}selected{% endif %}>Depth 1 - Direct Page Links (Recommended)</option>
                             <option value="2" {% if request.form.get('depth') == '2' %}selected{% endif %}>Depth 2 - Subtree Links (2 Levels)</option>
                             <option value="3" {% if request.form.get('depth') == '3' %}selected{% endif %}>Depth 3 - Deep Crawl (3 Levels)</option>
@@ -1225,21 +1256,35 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <!-- KPI Row -->
                 <div class="kpi-row">
                     <div class="kpi-card">
+                        <div class="kpi-label">Targets Tested</div>
+                        <div class="kpi-val">{{ (tested_targets|length if (tested_targets is defined and tested_targets) else 1) }}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
+                            Up to 10 URLs
+                        </div>
+                    </div>
+                    <div class="kpi-card">
                         <div class="kpi-label">Pages Scanned</div>
                         <div class="kpi-val">{{ total_pages }}</div>
-                        {% if url_stats and url_stats.uniqueDiscoveredUrls and url_stats.uniqueDiscoveredUrls > total_pages %}
+                        {% if url_stats is defined and url_stats and url_stats.uniqueDiscoveredUrls and url_stats.uniqueDiscoveredUrls > total_pages %}
                         <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;" title="Discovered URLs (Internal Debugging)">
                             {{ url_stats.uniqueDiscoveredUrls }} Discovered URLs
+                        </div>
+                        {% else %}
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
+                            Depths 0 to {{ (crawl_depth if crawl_depth is defined else 1) }}
                         </div>
                         {% endif %}
                     </div>
                     <div class="kpi-card">
-                        <div class="kpi-label">Emails Found</div>
-                        <div class="kpi-val">{{ emails_found|length }}</div>
+                        <div class="kpi-label">Discovered Links</div>
+                        <div class="kpi-val">{{ (total_discovered_links if total_discovered_links is defined and total_discovered_links else 0) }}</div>
+                        <div style="font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;">
+                            Across all levels
+                        </div>
                     </div>
                     <div class="kpi-card">
-                        <div class="kpi-label">Phones Found</div>
-                        <div class="kpi-val">{{ phones_found|length }}</div>
+                        <div class="kpi-label">Emails / Phones</div>
+                        <div class="kpi-val">{{ emails_found|length }} / {{ phones_found|length }}</div>
                     </div>
                     <div class="kpi-card">
                         <div class="kpi-label">BTC Wallets</div>
@@ -1253,9 +1298,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                 </div>
 
-                <!-- Tab Navigation (Only Crawled Pages) -->
+                <!-- Tab Navigation -->
                 <div class="tab-nav">
                     <button type="button" class="tab-btn active" onclick="switchTab('tab-pages')">📋 Crawled Pages ({{ total_pages }})</button>
+                    <button type="button" class="tab-btn" onclick="switchTab('tab-discovered')">🔗 Discovered Links by Level ({{ (total_discovered_links if total_discovered_links is defined and total_discovered_links else 0) }})</button>
+                    {% if tested_targets is defined and tested_targets and tested_targets|length > 1 %}
+                    <button type="button" class="tab-btn" onclick="switchTab('tab-targets')">🎯 Tested Targets ({{ tested_targets|length }})</button>
+                    {% endif %}
                 </div>
 
                 <!-- Tab 1: Pages Table -->
@@ -1389,6 +1438,118 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     </div>
                     {% endif %}
                 </div>
+
+                <!-- Tab 2: Discovered Links by Level (Depth 0 to Depth 5) -->
+                {% set disc_by_depth = (discovered_by_depth if (discovered_by_depth is defined and discovered_by_depth) else {}) %}
+                <div id="tab-discovered" class="tab-pane">
+                    <div style="margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+                        <span style="font-size: 0.85rem; color: var(--text-muted); font-weight: 600; margin-right: 6px;">Filter by Level:</span>
+                        <button type="button" class="depth-filter-btn active" onclick="filterDiscoveredByDepth('all')">All Levels ({{ (total_discovered_links if total_discovered_links is defined and total_discovered_links else 0) }})</button>
+                        {% for lvl in ['0', '1', '2', '3', '4', '5'] %}
+                        {% set lvl_links = disc_by_depth.get(lvl, []) %}
+                        <button type="button" class="depth-filter-btn" onclick="filterDiscoveredByDepth('{{ lvl }}')">Depth {{ lvl }} ({{ lvl_links|length }})</button>
+                        {% endfor %}
+                    </div>
+
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Level</th>
+                                    <th>Discovered URL</th>
+                                    <th>Domain Type</th>
+                                    <th>Status</th>
+                                    <th>Discovered On (Source Page)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% set found_any_disc = false %}
+                                {% for lvl in ['0', '1', '2', '3', '4', '5'] %}
+                                    {% for item in disc_by_depth.get(lvl, []) %}
+                                        {% set found_any_disc = true %}
+                                        <tr class="discovered-row" data-depth="{{ lvl }}">
+                                            <td><span class="badge badge-depth" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 0.8rem;">Depth {{ lvl }}</span></td>
+                                            <td><a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" class="out-link">{{ item.url }}</a></td>
+                                            <td>
+                                                {% set dt = (item.domainType or 'Internal')|lower %}
+                                                {% if dt == 'internal' %}
+                                                    <span class="domain-pill domain-internal">Internal</span>
+                                                {% else %}
+                                                    <span class="domain-pill domain-external">External</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if item.status == 200 %}
+                                                    <span class="status-pill status-200">200 OK</span>
+                                                {% elif item.status and item.status != 'Discovered' %}
+                                                    <span class="status-pill status-{{ item.status // 100 * 100 if item.status is number else 500 }}">{{ item.status }}</span>
+                                                {% else %}
+                                                    <span class="status-pill" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3);">Discovered</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if item.parentUrl %}
+                                                    <a href="{{ item.parentUrl }}" target="_blank" rel="noopener noreferrer" class="out-link" style="color: var(--text-muted); font-size: 0.82rem;">{{ item.parentUrl }}</a>
+                                                {% else %}
+                                                    <span style="color: var(--text-muted);">-</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                {% endfor %}
+                                {% if not found_any_disc %}
+                                <tr>
+                                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">No outgoing links discovered at crawled levels.</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {% if tested_targets is defined and tested_targets and tested_targets|length > 1 %}
+                <!-- Tab 3: Tested Targets (Up to 10) -->
+                <div id="tab-targets" class="tab-pane">
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Target URL</th>
+                                    <th>Type</th>
+                                    <th>Pages Scanned</th>
+                                    <th>Max Depth</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for t_url in tested_targets %}
+                                <tr>
+                                    <td>{{ loop.index }}</td>
+                                    <td><a href="{{ t_url }}" target="_blank" rel="noopener noreferrer" class="out-link"><strong>{{ t_url }}</strong></a></td>
+                                    <td>
+                                        {% if '.onion' in t_url|lower %}
+                                            <span class="tag-ssl-unverified" style="color: #38bdf8;">🧅 Tor Dark Web</span>
+                                        {% else %}
+                                            <span class="domain-pill domain-internal">🌐 Clearnet</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% set t_pages = [] %}
+                                        {% for p in pages %}
+                                            {% if t_url in p.url or (p.parentUrl and t_url in p.parentUrl) %}
+                                                {% set _ = t_pages.append(p) %}
+                                            {% endif %}
+                                        {% endfor %}
+                                        {{ t_pages|length or "Scanned" }}
+                                    </td>
+                                    <td>Depth {{ crawl_depth|default(1) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -1397,6 +1558,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <script>
+        function filterDiscoveredByDepth(depth) {
+            document.querySelectorAll('.depth-filter-btn').forEach(btn => btn.classList.remove('active'));
+            if (window.event && window.event.currentTarget) {
+                window.event.currentTarget.classList.add('active');
+            }
+            document.querySelectorAll('.discovered-row').forEach(row => {
+                if (depth === 'all' || row.getAttribute('data-depth') === String(depth)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
         function switchTab(tabId) {
             document.querySelectorAll('.tab-pane').forEach(el => el.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
@@ -1775,27 +1950,40 @@ def index():
     result_available = False
     raw_query = ""
     target_url = ""
+    target_urls: List[str] = []
     url_stats: Dict[str, Any] = {}
+    discovered_urls: List[Dict[str, Any]] = []
+    discovered_by_depth: Dict[str, List[Dict[str, Any]]] = {str(i): [] for i in range(6)}
+    total_discovered_links = 0
+    tested_targets: List[str] = []
+    crawl_depth = 1
 
     if request.method == "POST":
         raw_query = request.form.get("url", "").strip()
-        if not raw_query:
+        from torbot.cli import parse_urls_input
+        parsed_targets = parse_urls_input(raw_query)
+        if not parsed_targets:
             output = "Error: Please enter a target URL, .onion address, or search query."
             return_code = 1
             command_run = "(none)"
         else:
+            if len(parsed_targets) > 10:
+                parsed_targets = parsed_targets[:10]
             raw_depth = request.form.get("depth", "1").strip()
             try:
                 depth = max(0, min(5, int(raw_depth)))
             except ValueError:
                 depth = 1
+            crawl_depth = depth
 
             action = request.form.get("action", "table").strip()
             run_info = request.form.get("run_info")
             resolve_relative = request.form.get("resolve_relative")
             save_result = request.form.get("save_result")
             disable_socks = request.form.get("disable_socks")
-            target_url = normalize_url(raw_query, disable_socks=bool(disable_socks))
+            target_urls = [normalize_url(u, disable_socks=bool(disable_socks)) for u in parsed_targets]
+            target_url = target_urls[0]
+            tested_targets = list(target_urls)
             tor_host = request.form.get("host", "127.0.0.1").strip() or "127.0.0.1"
             try:
                 tor_port = int(request.form.get("port", "9050").strip() or "9050")
@@ -1803,7 +1991,8 @@ def index():
                 tor_port = 9050
 
             # Guard: .onion addresses must always route through Tor SOCKS5 proxy
-            if ".onion" in target_url.lower():
+            has_onion_target = any(".onion" in u.lower() for u in target_urls)
+            if has_onion_target:
                 disable_socks = None
                 if not tor_online:
                     output = (
@@ -1825,7 +2014,7 @@ def index():
                 venv_py = REPO_DIR / ".venv" / "bin" / "python"
                 python_exec = str(venv_py) if venv_py.exists() else sys.executable
 
-                cmd = [python_exec, str(script_path), "-u", target_url, "-q"]
+                cmd = [python_exec, str(script_path), "-u", *target_urls, "-q"]
                 cmd.extend(["--depth", str(depth)])
                 cmd.extend(["--host", tor_host, "--port", str(tor_port)])
 
@@ -1954,6 +2143,20 @@ def index():
                         ]
                     json_pretty = json.dumps(crawl_data, indent=2)
 
+                    discovered_urls = crawl_data.get("discoveredUrls", [])
+                    discovered_by_depth = crawl_data.get("discoveredByDepth", {})
+                    for lvl in range(6):
+                        k = str(lvl)
+                        if k not in discovered_by_depth:
+                            discovered_by_depth[k] = [d for d in discovered_urls if d.get("depth") == lvl]
+
+                    total_discovered_links = (
+                        len(discovered_urls)
+                        or sum(len(v) for v in discovered_by_depth.values())
+                        or saved_stats.get("totalDiscoveredUrls", 0)
+                    )
+                    tested_targets = crawl_data.get("targets", target_urls if target_urls else ([target_url] if target_url else []))
+
                     # Persist updated crawl_data so /download/result exactly matches verified pages
                     try:
                         with open(RESULT_FILE, "w", encoding="utf-8") as f:
@@ -2072,6 +2275,11 @@ def index():
         action_mode=action_mode,
         result_available=result_available,
         ssl_notice=ssl_notice,
+        discovered_urls=discovered_urls,
+        discovered_by_depth=discovered_by_depth,
+        total_discovered_links=total_discovered_links,
+        tested_targets=tested_targets,
+        crawl_depth=crawl_depth,
     )
 
 

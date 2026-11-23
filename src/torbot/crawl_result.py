@@ -100,6 +100,13 @@ class CrawlResultAdapter:
 
         url_stats = getattr(self.tree, "get_url_stats", lambda: {})()
         discovered_urls = getattr(self.tree, "get_discovered_urls_details", lambda: [])()
+        discovered_by_depth = {}
+        if hasattr(self.tree, "get_discovered_links_by_level"):
+            discovered_by_depth = {
+                str(k): v
+                for k, v in self.tree.get_discovered_links_by_level().items()
+                if v
+            }
 
         result = {
             "schemaVersion": SCHEMA_VERSION,
@@ -116,6 +123,7 @@ class CrawlResultAdapter:
             "pages": verified_pages,
             "stats": url_stats,
             "discoveredUrls": discovered_urls,
+            "discoveredByDepth": discovered_by_depth,
             "diagnostics": _safe_diagnostics(diagnostics or {}),
         }
         return result
@@ -123,9 +131,13 @@ class CrawlResultAdapter:
     def _page(self, node: Any, *, include_text: bool = False) -> dict[str, Any]:
         parent = self.tree.parent(node.identifier)
         depth = self.tree.depth(node.identifier)
+        child_urls = [child.identifier for child in self.tree.children(node.identifier)]
+        discovered = getattr(node.data, "discovered_links", None)
         links = []
-        for child in self.tree.children(node.identifier):
-            links.append({"url": child.identifier, "source": "anchor"})
+        if discovered is not None and len(discovered) > 0:
+            links = [{"url": u, "source": "anchor"} for u in discovered]
+        else:
+            links = [{"url": u, "source": "anchor"} for u in child_urls]
         contacts = []
         contacts.extend(
             {"value": email, "source": "mailto"} for email in sorted(node.data.emails)
